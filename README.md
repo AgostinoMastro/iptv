@@ -45,6 +45,7 @@ Edit the `$Sources` array in [scripts/refresh.ps1](scripts/refresh.ps1):
 
 - `Include = $null` keeps ALL channels from that source (used for Italy).
 - `Include = 'CBC|CP24|TSN|Rai World'` keeps only channels whose name matches the regex (used for Canada).
+- `GroupTitle = 'Canada'` rewrites the category for matched channels so they appear together in the app.
 
 Add another line to include a new country; everything merges into the single `playlist.m3u`, so the URL above stays the same.
 

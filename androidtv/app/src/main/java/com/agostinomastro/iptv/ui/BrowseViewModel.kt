@@ -4,7 +4,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.agostinomastro.iptv.data.FavoritesStore
 import com.agostinomastro.iptv.data.PlaylistRepository
+import com.agostinomastro.iptv.data.RecentsStore
 import com.agostinomastro.iptv.model.Channel
+import com.agostinomastro.iptv.model.GroupTitles
 import com.agostinomastro.iptv.model.favoriteKey
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +20,7 @@ data class BrowseUiState(
     val allChannels: List<Channel> = emptyList(),
     val groupedChannels: Map<String, List<Channel>> = emptyMap(),
     val favoriteKeys: Set<String> = emptySet(),
+    val recentChannels: List<Channel> = emptyList(),
     val heroChannel: Channel? = null,
     val previewChannel: Channel? = null,
     val activeFilter: BrowseFilter = BrowseFilter.Home,
@@ -35,7 +38,7 @@ data class BrowseUiState(
         get() = searchExpanded && searchQuery.isNotBlank()
 
     val filterBaseChannels: List<Channel>
-        get() = channelsForFilter(activeFilter, allChannels, favoriteKeys)
+        get() = channelsForFilter(activeFilter, allChannels, favoriteKeys, recentChannels)
 
     val searchResults: List<Channel>
         get() = if (!isSearching) emptyList() else filterBaseChannels.filter { it.matchesSearch(searchQuery) }
@@ -52,13 +55,20 @@ data class BrowseUiState(
                     if (favoriteChannels.isNotEmpty()) {
                         add(ContentSection("Favourites", favoriteChannels))
                     }
+                    if (recentChannels.isNotEmpty()) {
+                        add(ContentSection("Recents", recentChannels))
+                    }
                     groupedChannels.forEach { (group, channels) ->
-                        add(ContentSection(group, channels))
+                        add(ContentSection(GroupTitles.displayTitle(group), channels))
                     }
                 }
                 BrowseFilter.Favourites -> {
                     if (favoriteChannels.isEmpty()) emptyList()
                     else listOf(ContentSection("Favourites", favoriteChannels))
+                }
+                BrowseFilter.Recents -> {
+                    if (recentChannels.isEmpty()) emptyList()
+                    else listOf(ContentSection("Recents", recentChannels))
                 }
                 else -> {
                     val channels = filterBaseChannels
@@ -93,10 +103,13 @@ private fun Channel.matchesCategory(category: String): Boolean {
 private fun channelsForFilter(
     filter: BrowseFilter,
     allChannels: List<Channel>,
-    favoriteKeys: Set<String>
+    favoriteKeys: Set<String>,
+    recentChannels: List<Channel>
 ): List<Channel> = when (filter) {
     BrowseFilter.Home -> allChannels
     BrowseFilter.Favourites -> allChannels.filter { it.favoriteKey in favoriteKeys }
+    BrowseFilter.Recents -> recentChannels
+    BrowseFilter.Canada -> allChannels.filter { it.matchesCategory("Canada") }
     BrowseFilter.News -> allChannels.filter { it.matchesCategory("News") }
     BrowseFilter.Sports -> allChannels.filter { it.matchesCategory("Sports") }
     BrowseFilter.Movies -> allChannels.filter { it.matchesCategory("Movies") }
@@ -104,7 +117,8 @@ private fun channelsForFilter(
 
 class BrowseViewModel(
     private val repository: PlaylistRepository,
-    private val favoritesStore: FavoritesStore
+    private val favoritesStore: FavoritesStore,
+    private val recentsStore: RecentsStore
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
@@ -123,9 +137,10 @@ class BrowseViewModel(
                 .onSuccess { channels ->
                     val grouped = channels
                         .groupBy { it.group.ifBlank { "General" } }
-                        .toSortedMap(compareBy { it.lowercase() })
+                        .toSortedMap(compareBy { GroupTitles.sortKey(it) })
 
                     val favorites = favoritesStore.getAll()
+                    val recents = recentsStore.resolveChannels(channels)
                     val hero = channels.firstOrNull()
                     _state.update {
                         it.copy(
@@ -133,6 +148,7 @@ class BrowseViewModel(
                             allChannels = channels,
                             groupedChannels = grouped,
                             favoriteKeys = favorites,
+                            recentChannels = recents,
                             heroChannel = hero,
                             previewChannel = hero,
                             error = null
@@ -150,18 +166,14 @@ class BrowseViewModel(
         }
     }
 
-    fun previewChannel(channel: Channel) {
-        _state.update { it.copy(previewChannel = channel) }
+    fun refreshRecents() {
+        _state.update { state ->
+            state.copy(recentChannels = recentsStore.resolveChannels(state.allChannels))
+        }
     }
 
-    fun onChannelSelect(channel: Channel): Boolean {
-        val current = _state.value.displayedChannel
-        return if (current?.favoriteKey == channel.favoriteKey) {
-            true
-        } else {
-            _state.update { it.copy(previewChannel = channel) }
-            false
-        }
+    fun previewChannel(channel: Channel) {
+        _state.update { it.copy(previewChannel = channel) }
     }
 
     fun toggleFavorite(channel: Channel): Boolean {
@@ -172,7 +184,7 @@ class BrowseViewModel(
 
     fun setActiveFilter(filter: BrowseFilter) {
         _state.update { state ->
-            val base = channelsForFilter(filter, state.allChannels, state.favoriteKeys)
+            val base = channelsForFilter(filter, state.allChannels, state.favoriteKeys, state.recentChannels)
             state.copy(
                 activeFilter = filter,
                 searchExpanded = false,

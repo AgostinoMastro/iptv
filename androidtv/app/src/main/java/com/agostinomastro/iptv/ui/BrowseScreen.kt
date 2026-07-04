@@ -48,6 +48,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -55,12 +56,14 @@ import androidx.tv.material3.Button
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
-import coil.compose.AsyncImage
 import com.agostinomastro.iptv.PlayerActivity
 import com.agostinomastro.iptv.data.FavoritesStore
 import com.agostinomastro.iptv.data.PlaylistRepository
+import com.agostinomastro.iptv.data.RecentsStore
 import com.agostinomastro.iptv.model.Channel
 import com.agostinomastro.iptv.model.favoriteKey
+import com.agostinomastro.iptv.model.GroupTitles
+import com.agostinomastro.iptv.model.logoUrls
 import com.agostinomastro.iptv.ui.theme.PrimeColors
 
 @OptIn(ExperimentalTvMaterial3Api::class)
@@ -69,12 +72,17 @@ fun BrowseScreen(
     viewModel: BrowseViewModel = viewModel(
         factory = BrowseViewModelFactory(
             PlaylistRepository(LocalContext.current.applicationContext),
-            FavoritesStore(LocalContext.current.applicationContext)
+            FavoritesStore(LocalContext.current.applicationContext),
+            RecentsStore(LocalContext.current.applicationContext)
         )
     )
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
+
+    LifecycleEventEffect(androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshRecents()
+    }
 
     fun toggleFavorite(channel: Channel) {
         val added = viewModel.toggleFavorite(channel)
@@ -98,9 +106,8 @@ fun BrowseScreen(
                 val isHeroFavorite = hero?.favoriteKey in state.favoriteKeys
 
                 fun onChannelClick(channel: Channel) {
-                    if (viewModel.onChannelSelect(channel)) {
-                        context.startActivity(PlayerActivity.intent(context, channel))
-                    }
+                    viewModel.previewChannel(channel)
+                    context.startActivity(PlayerActivity.intent(context, channel))
                 }
 
                 Column(modifier = Modifier.fillMaxSize()) {
@@ -253,6 +260,8 @@ private fun FilterChip(
 
 private fun emptyFilterMessage(filter: BrowseFilter): String = when (filter) {
     BrowseFilter.Favourites -> "No favourites yet. Hold Select on a channel to add one."
+    BrowseFilter.Recents -> "No recent channels yet. Play a channel and it will appear here."
+    BrowseFilter.Canada -> "No Canadian channels in your playlist."
     BrowseFilter.News -> "No news channels in your playlist."
     BrowseFilter.Sports -> "No sports channels in your playlist."
     BrowseFilter.Movies -> "No movie channels in your playlist."
@@ -350,15 +359,13 @@ private fun HeroSection(
             .fillMaxWidth()
             .height(360.dp)
     ) {
-        if (!channel?.logo.isNullOrBlank()) {
-            AsyncImage(
-                model = channel.logo,
-                contentDescription = null,
+        if (channel != null && channel.logoUrls().isNotEmpty()) {
+            ChannelLogo(
+                channel = channel,
                 modifier = Modifier
                     .fillMaxSize()
                     .alpha(0.45f),
-                contentScale = ContentScale.Crop,
-                alignment = Alignment.Center
+                contentScale = ContentScale.Crop
             )
         } else {
             Box(
@@ -425,7 +432,7 @@ private fun HeroSection(
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = channel.group,
+                        text = GroupTitles.displayTitle(channel.group),
                         color = PrimeColors.TextSecondary,
                         style = MaterialTheme.typography.bodyLarge
                     )
@@ -441,7 +448,7 @@ private fun HeroSection(
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "Select to preview · Select again or press Play to watch · Hold Select to favourite",
+                    text = "Select to watch · Hold Select to favourite",
                     color = PrimeColors.TextDisabled,
                     style = MaterialTheme.typography.bodySmall,
                     maxLines = 2,
@@ -552,25 +559,14 @@ private fun ChannelCard(
                     .padding(8.dp)
             )
         }
-        if (!channel.logo.isNullOrBlank()) {
-            AsyncImage(
-                model = channel.logo,
-                contentDescription = channel.name,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp),
-                contentScale = ContentScale.Fit
-            )
-        } else {
-            Text(
-                text = channel.name,
-                color = PrimeColors.TextPrimary,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(12.dp)
-            )
-        }
+        ChannelLogo(
+            channel = channel,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            contentScale = ContentScale.Fit,
+            showNameOnFailure = true
+        )
     }
 }
 

@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">IPTV</string>
+    <string name="live">LIVE</string>
+    <string name="paused">PAUSED</string>
+    <string name="go_live">Go Live</string>
+    <string name="play_pause">Play or pause</string>
+    <string name="rewind">Rewind 10 seconds</string>
+    <string name="fast_forward">Fast forward 10 seconds</string>
+    <string name="behind_live">%1$s behind live</string>
 </resources>

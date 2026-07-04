@@ -32,8 +32,8 @@ Set-Location $RepoRoot
 # display name. Include = $null keeps ALL channels from that source.
 # Everything is merged into the single OutputFile, so the TV URL never changes.
 $Sources = @(
-    [pscustomobject]@{ Url = 'https://iptv-org.github.io/iptv/countries/it.m3u'; Include = $null },
-    [pscustomobject]@{ Url = 'https://iptv-org.github.io/iptv/countries/ca.m3u'; Include = 'CBC|CP24|TSN|Rai World' }
+    [pscustomobject]@{ Url = 'https://iptv-org.github.io/iptv/countries/it.m3u'; Include = $null; GroupTitle = $null },
+    [pscustomobject]@{ Url = 'https://iptv-org.github.io/iptv/countries/ca.m3u'; Include = 'CBC|CP24|TSN|Rai World'; GroupTitle = 'Canada' }
 )
 $OutputFile = Join-Path $RepoRoot 'playlist.m3u'
 # ------------------------------------------------------------------------
@@ -41,14 +41,28 @@ $OutputFile = Join-Path $RepoRoot 'playlist.m3u'
 $work = Join-Path $env:TEMP ("iptv-refresh-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 
+function Set-GroupTitle {
+    param([string]$ExtInfLine, [string]$GroupTitle)
+    if ($ExtInfLine -match 'group-title="[^"]*"') {
+        return ($ExtInfLine -replace 'group-title="[^"]*"', "group-title=`"$GroupTitle`"")
+    }
+    return ($ExtInfLine -replace '(#EXTINF:[^\r\n]*)(,\s*)', "`$1 group-title=`"$GroupTitle`"`$2")
+}
+
 # Adds an entry (its #EXTINF line + following option/URL lines) to $lines when it
 # passes the include filter.
 function Add-Entry {
-    param($Buffer, $Include, $Lines)
+    param($Buffer, $Include, $GroupTitle, $Lines)
     if ($null -eq $Buffer -or $Buffer.Count -eq 0) { return }
     $name = ($Buffer[0] -replace '^.*?,', '')
     if ($null -eq $Include -or $name -match $Include) {
-        foreach ($l in $Buffer) { $Lines.Add($l) }
+        for ($i = 0; $i -lt $Buffer.Count; $i++) {
+            $line = $Buffer[$i]
+            if ($i -eq 0 -and $GroupTitle) {
+                $line = Set-GroupTitle -ExtInfLine $line -GroupTitle $GroupTitle
+            }
+            $Lines.Add($line)
+        }
     }
 }
 
@@ -68,7 +82,7 @@ try {
         foreach ($line in (Get-Content -LiteralPath $tmp -Encoding UTF8)) {
             if ($line -match '^\s*#EXTM3U') { continue }
             if ($line -match '^\s*#EXTINF') {
-                Add-Entry -Buffer $buffer -Include $src.Include -Lines $lines
+                Add-Entry -Buffer $buffer -Include $src.Include -GroupTitle $src.GroupTitle -Lines $lines
                 $buffer = New-Object System.Collections.Generic.List[string]
                 $buffer.Add($line)
             }
@@ -76,7 +90,7 @@ try {
                 $buffer.Add($line)
             }
         }
-        Add-Entry -Buffer $buffer -Include $src.Include -Lines $lines
+        Add-Entry -Buffer $buffer -Include $src.Include -GroupTitle $src.GroupTitle -Lines $lines
     }
 
     # Write UTF-8 WITHOUT a BOM (a BOM makes iptv-checker fail with "Unable to parse a playlist")
