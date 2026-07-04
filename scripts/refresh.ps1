@@ -40,14 +40,18 @@ New-Item -ItemType Directory -Path $work -Force | Out-Null
 try {
     Write-Host "[1/4] Downloading $($Sources.Count) source playlist(s)..."
     $merged = Join-Path $work 'merged-source.m3u'
-    "#EXTM3U" | Out-File -FilePath $merged -Encoding utf8
+    $lines = New-Object System.Collections.Generic.List[string]
+    $lines.Add('#EXTM3U')
     foreach ($url in $Sources) {
+        # Download to a file (Invoke-WebRequest .Content can return raw bytes), then read as text.
         $tmp = Join-Path $work ("src-" + [guid]::NewGuid().ToString('N') + ".m3u")
         Invoke-WebRequest -Uri $url -OutFile $tmp -UseBasicParsing
-        # Append everything except the leading #EXTM3U header line
-        Get-Content $tmp | Where-Object { $_ -notmatch '^\s*#EXTM3U' } |
-            Out-File -FilePath $merged -Encoding utf8 -Append
+        foreach ($line in (Get-Content -LiteralPath $tmp)) {
+            if ($line -notmatch '^\s*#EXTM3U') { $lines.Add($line) }
+        }
     }
+    # Write UTF-8 WITHOUT a BOM (a BOM makes iptv-checker fail with "Unable to parse a playlist")
+    [System.IO.File]::WriteAllLines($merged, $lines, (New-Object System.Text.UTF8Encoding($false)))
 
     Write-Host "[2/4] Checking streams (timeout ${TimeoutMs}ms, parallel ${Parallel})..."
     $checkOut = Join-Path $work 'checked'
