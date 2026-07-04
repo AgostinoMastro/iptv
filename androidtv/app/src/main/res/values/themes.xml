@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.IPTV" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/background</item>
+        <item name="android:colorBackground">@color/background</item>
+    </style>
+    <style name="Theme.IPTV.Player" parent="Theme.IPTV">
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>

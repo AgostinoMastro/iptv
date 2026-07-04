@@ -3,3 +3,11 @@ checked/
 *-source.m3u
 *-dead.m3u
 *.log
+
+# Android build
+androidtv/.gradle/
+androidtv/local.properties
+androidtv/release.jks
+androidtv/app/build/
+androidtv/build/
+androidtv/.idea/

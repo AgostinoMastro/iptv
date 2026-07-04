@@ -1,0 +1,7 @@
+sdk.dir=C\:\\Users\\agost\\AppData\\Local\\Android\\Sdk
+
+# Copy to local.properties and fill in after creating release.jks:
+# RELEASE_STORE_FILE=release.jks
+# RELEASE_STORE_PASSWORD=your-password
+# RELEASE_KEY_ALIAS=iptv
+# RELEASE_KEY_PASSWORD=your-password

@@ -53,3 +53,47 @@ Add another line to include a new country; everything merges into the single `pl
 - Some channels are tagged `[Geo-blocked]` and only play from inside their home country (use a VPN). The CBC regional feeds are geo-blocked to Canada.
 - The list is a point-in-time snapshot; the weekly refresh (with retries) keeps it healthy.
 - Source data: [iptv-org/iptv](https://github.com/iptv-org/iptv). Checker: [freearhey/iptv-checker](https://github.com/freearhey/iptv-checker).
+
+## Custom Fire TV app (Prime-style UI)
+
+This repo includes a custom Android TV app that loads the playlist automatically on launch — no login, no manual URL entry.
+
+### Install on Fire Stick (Downloader app)
+
+1. On the Fire Stick, install **Downloader** from the Amazon Appstore.
+2. Settings → My Fire TV → Developer Options → **Install unknown apps** → enable for **Downloader**.
+3. Open Downloader and enter this URL:
+
+```
+https://raw.githubusercontent.com/AgostinoMastro/iptv/main/dist/tv.apk
+```
+
+4. Download → Install → Open **IPTV** from Your Apps.
+
+The app fetches `playlist.m3u` live on each launch (with offline cache fallback). Navigate with the remote: category rows of channel logo cards, **Play** in the hero, or select a card to start streaming.
+
+### Rebuild the app (optional)
+
+Source lives in [androidtv/](androidtv/). Requires Android Studio / SDK (already on this machine).
+
+```powershell
+cd androidtv
+$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+.\gradlew.bat :app:assembleRelease
+Copy-Item app\build\outputs\apk\release\app-release.apk ..\dist\tv.apk
+```
+
+Signing uses `androidtv/local.properties` (gitignored) and `androidtv/release.jks` (gitignored). To create a keystore:
+
+```powershell
+keytool -genkeypair -v -keystore androidtv/release.jks -alias iptv -keyalg RSA -keysize 2048 -validity 10000
+```
+
+Then add to `androidtv/local.properties`:
+
+```
+RELEASE_STORE_FILE=release.jks
+RELEASE_STORE_PASSWORD=your-password
+RELEASE_KEY_ALIAS=iptv
+RELEASE_KEY_PASSWORD=your-password
+```
