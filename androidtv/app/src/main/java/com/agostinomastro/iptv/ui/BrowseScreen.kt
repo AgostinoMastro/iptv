@@ -1,9 +1,11 @@
 package com.agostinomastro.iptv.ui
 
-import android.content.Intent
+import android.widget.Toast
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,17 +42,18 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.tv.material3.Button
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.tv.material3.Button
 import androidx.tv.material3.ExperimentalTvMaterial3Api
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
 import com.agostinomastro.iptv.PlayerActivity
+import com.agostinomastro.iptv.data.FavoritesStore
 import com.agostinomastro.iptv.data.PlaylistRepository
 import com.agostinomastro.iptv.model.Channel
+import com.agostinomastro.iptv.model.favoriteKey
 import com.agostinomastro.iptv.ui.theme.PrimeColors
 
 @OptIn(ExperimentalTvMaterial3Api::class)
@@ -58,12 +61,19 @@ import com.agostinomastro.iptv.ui.theme.PrimeColors
 fun BrowseScreen(
     viewModel: BrowseViewModel = viewModel(
         factory = BrowseViewModelFactory(
-            PlaylistRepository(LocalContext.current.applicationContext)
+            PlaylistRepository(LocalContext.current.applicationContext),
+            FavoritesStore(LocalContext.current.applicationContext)
         )
     )
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
+
+    fun toggleFavorite(channel: Channel) {
+        val added = viewModel.toggleFavorite(channel)
+        val message = if (added) "Added to Favourites" else "Removed from Favourites"
+        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    }
 
     Box(
         modifier = Modifier
@@ -78,6 +88,7 @@ fun BrowseScreen(
             )
             else -> {
                 val hero = state.focusedChannel ?: state.heroChannel
+                val isHeroFavorite = hero?.favoriteKey in state.favoriteKeys
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 48.dp)
@@ -85,10 +96,26 @@ fun BrowseScreen(
                     item {
                         HeroSection(
                             channel = hero,
+                            isFavorite = isHeroFavorite,
                             onPlay = { channel ->
                                 context.startActivity(PlayerActivity.intent(context, channel))
                             }
                         )
+                    }
+
+                    if (state.favoriteChannels.isNotEmpty()) {
+                        item {
+                            CategoryRow(
+                                title = "Favourites",
+                                channels = state.favoriteChannels,
+                                favoriteKeys = state.favoriteKeys,
+                                onChannelFocused = viewModel::onChannelFocused,
+                                onChannelClick = { channel ->
+                                    context.startActivity(PlayerActivity.intent(context, channel))
+                                },
+                                onChannelLongClick = ::toggleFavorite
+                            )
+                        }
                     }
 
                     state.groupedChannels.forEach { (group, channels) ->
@@ -96,10 +123,12 @@ fun BrowseScreen(
                             CategoryRow(
                                 title = group,
                                 channels = channels,
+                                favoriteKeys = state.favoriteKeys,
                                 onChannelFocused = viewModel::onChannelFocused,
                                 onChannelClick = { channel ->
                                     context.startActivity(PlayerActivity.intent(context, channel))
-                                }
+                                },
+                                onChannelLongClick = ::toggleFavorite
                             )
                         }
                     }
@@ -113,6 +142,7 @@ fun BrowseScreen(
 @Composable
 private fun HeroSection(
     channel: Channel?,
+    isFavorite: Boolean,
     onPlay: (Channel) -> Unit
 ) {
     Box(
@@ -151,10 +181,27 @@ private fun HeroSection(
             )
             if (channel != null) {
                 Spacer(modifier = Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = channel.group,
+                        color = PrimeColors.TextSecondary,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    if (isFavorite) {
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "★ Favourite",
+                            color = PrimeColors.Accent,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = channel.group,
-                    color = PrimeColors.TextSecondary,
-                    style = MaterialTheme.typography.bodyLarge
+                    text = "Hold Select on a channel to add or remove favourites",
+                    color = PrimeColors.TextDisabled,
+                    style = MaterialTheme.typography.bodySmall
                 )
                 Spacer(modifier = Modifier.height(20.dp))
                 Button(onClick = { onPlay(channel) }) {
@@ -170,8 +217,10 @@ private fun HeroSection(
 private fun CategoryRow(
     title: String,
     channels: List<Channel>,
+    favoriteKeys: Set<String>,
     onChannelFocused: (Channel) -> Unit,
-    onChannelClick: (Channel) -> Unit
+    onChannelClick: (Channel) -> Unit,
+    onChannelLongClick: (Channel) -> Unit
 ) {
     Column(modifier = Modifier.padding(top = 20.dp)) {
         Text(
@@ -188,20 +237,24 @@ private fun CategoryRow(
             items(channels, key = { "${it.group}-${it.name}-${it.url}" }) { channel ->
                 ChannelCard(
                     channel = channel,
+                    isFavorite = channel.favoriteKey in favoriteKeys,
                     onFocused = { onChannelFocused(channel) },
-                    onClick = { onChannelClick(channel) }
+                    onClick = { onChannelClick(channel) },
+                    onLongClick = { onChannelLongClick(channel) }
                 )
             }
         }
     }
 }
 
-@OptIn(ExperimentalTvMaterial3Api::class)
+@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 private fun ChannelCard(
     channel: Channel,
+    isFavorite: Boolean,
     onFocused: () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (isFocused) 1.1f else 1f, label = "cardScale")
@@ -221,10 +274,11 @@ private fun ChannelCard(
                 shape = shape
             )
             .focusable(interactionSource = interactionSource)
-            .clickable(
+            .combinedClickable(
                 interactionSource = interactionSource,
                 indication = null,
-                onClick = onClick
+                onClick = onClick,
+                onLongClick = onLongClick
             )
             .onFocusChanged {
                 isFocused = it.isFocused
@@ -232,6 +286,17 @@ private fun ChannelCard(
             },
         contentAlignment = Alignment.Center
     ) {
+        if (isFavorite) {
+            Text(
+                text = "★",
+                color = PrimeColors.Accent,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+            )
+        }
         if (!channel.logo.isNullOrBlank()) {
             AsyncImage(
                 model = channel.logo,
