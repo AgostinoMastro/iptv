@@ -20,6 +20,7 @@ data class BrowseUiState(
     val favoriteKeys: Set<String> = emptySet(),
     val heroChannel: Channel? = null,
     val previewChannel: Channel? = null,
+    val searchQuery: String = "",
     val fromCache: Boolean = false
 ) {
     val favoriteChannels: List<Channel>
@@ -27,6 +28,28 @@ data class BrowseUiState(
 
     val displayedChannel: Channel?
         get() = previewChannel ?: heroChannel
+
+    val isSearching: Boolean
+        get() = searchQuery.isNotBlank()
+
+    val searchResults: List<Channel>
+        get() = if (!isSearching) emptyList() else allChannels.filter { it.matchesSearch(searchQuery) }
+
+    val visibleGroupedChannels: Map<String, List<Channel>>
+        get() {
+            if (!isSearching) return groupedChannels
+            return searchResults
+                .groupBy { it.group.ifBlank { "General" } }
+                .toSortedMap(compareBy { it.lowercase() })
+        }
+}
+
+private fun Channel.matchesSearch(query: String): Boolean {
+    val q = query.trim().lowercase()
+    if (q.isEmpty()) return true
+    return name.lowercase().contains(q) ||
+        group.lowercase().contains(q) ||
+        (tvgId?.lowercase()?.contains(q) == true)
 }
 
 class BrowseViewModel(
@@ -105,4 +128,20 @@ class BrowseViewModel(
 
     fun isFavorite(channel: Channel): Boolean =
         channel.favoriteKey in _state.value.favoriteKeys
+
+    fun setSearchQuery(query: String) {
+        _state.update { state ->
+            val results = if (query.isBlank()) emptyList() else state.allChannels.filter { it.matchesSearch(query) }
+            val preview = when {
+                query.isNotBlank() && results.isNotEmpty() -> results.first()
+                query.isBlank() -> state.previewChannel ?: state.heroChannel
+                else -> state.previewChannel
+            }
+            state.copy(searchQuery = query, previewChannel = preview)
+        }
+    }
+
+    fun clearSearch() {
+        setSearchQuery("")
+    }
 }

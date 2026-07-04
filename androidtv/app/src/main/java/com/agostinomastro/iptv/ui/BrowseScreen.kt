@@ -22,6 +22,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -36,9 +39,12 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -97,49 +103,162 @@ fun BrowseScreen(
                     }
                 }
 
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(bottom = 48.dp)
-                ) {
-                    item {
-                        HeroSection(
-                            channel = hero,
-                            isFavorite = isHeroFavorite,
-                            onPlay = { channel ->
-                                context.startActivity(PlayerActivity.intent(context, channel))
-                            }
-                        )
-                    }
+                Column(modifier = Modifier.fillMaxSize()) {
+                    SearchBar(
+                        query = state.searchQuery,
+                        resultCount = if (state.isSearching) state.searchResults.size else null,
+                        onQueryChange = viewModel::setSearchQuery,
+                        onClear = viewModel::clearSearch
+                    )
 
-                    if (state.favoriteChannels.isNotEmpty()) {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(bottom = 48.dp)
+                    ) {
                         item {
-                            CategoryRow(
-                                title = "Favourites",
-                                channels = state.favoriteChannels,
-                                favoriteKeys = state.favoriteKeys,
-                                previewChannelKey = hero?.favoriteKey,
-                                onChannelFocused = viewModel::previewChannel,
-                                onChannelClick = ::onChannelClick,
-                                onChannelLongClick = ::toggleFavorite
+                            HeroSection(
+                                channel = hero,
+                                isFavorite = isHeroFavorite,
+                                onPlay = { channel ->
+                                    context.startActivity(PlayerActivity.intent(context, channel))
+                                }
                             )
                         }
-                    }
 
-                    state.groupedChannels.forEach { (group, channels) ->
-                        item {
-                            CategoryRow(
-                                title = group,
-                                channels = channels,
-                                favoriteKeys = state.favoriteKeys,
-                                previewChannelKey = hero?.favoriteKey,
-                                onChannelFocused = viewModel::previewChannel,
-                                onChannelClick = ::onChannelClick,
-                                onChannelLongClick = ::toggleFavorite
-                            )
+                        if (state.isSearching) {
+                            if (state.searchResults.isEmpty()) {
+                                item {
+                                    Text(
+                                        text = "No channels match \"${state.searchQuery}\"",
+                                        color = PrimeColors.TextSecondary,
+                                        modifier = Modifier.padding(horizontal = 48.dp, vertical = 24.dp),
+                                        style = MaterialTheme.typography.bodyLarge
+                                    )
+                                }
+                            } else {
+                                item {
+                                    CategoryRow(
+                                        title = "Search results (${state.searchResults.size})",
+                                        channels = state.searchResults,
+                                        favoriteKeys = state.favoriteKeys,
+                                        previewChannelKey = hero?.favoriteKey,
+                                        onChannelFocused = viewModel::previewChannel,
+                                        onChannelClick = ::onChannelClick,
+                                        onChannelLongClick = ::toggleFavorite
+                                    )
+                                }
+                            }
+                        } else {
+                            if (state.favoriteChannels.isNotEmpty()) {
+                                item {
+                                    CategoryRow(
+                                        title = "Favourites",
+                                        channels = state.favoriteChannels,
+                                        favoriteKeys = state.favoriteKeys,
+                                        previewChannelKey = hero?.favoriteKey,
+                                        onChannelFocused = viewModel::previewChannel,
+                                        onChannelClick = ::onChannelClick,
+                                        onChannelLongClick = ::toggleFavorite
+                                    )
+                                }
+                            }
+
+                            state.visibleGroupedChannels.forEach { (group, channels) ->
+                                item {
+                                    CategoryRow(
+                                        title = group,
+                                        channels = channels,
+                                        favoriteKeys = state.favoriteKeys,
+                                        previewChannelKey = hero?.favoriteKey,
+                                        onChannelFocused = viewModel::previewChannel,
+                                        onChannelClick = ::onChannelClick,
+                                        onChannelLongClick = ::toggleFavorite
+                                    )
+                                }
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
+private fun SearchBar(
+    query: String,
+    resultCount: Int?,
+    onQueryChange: (String) -> Unit,
+    onClear: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(8.dp)
+    val borderColor = if (isFocused) PrimeColors.Accent else PrimeColors.Surface
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(PrimeColors.Background)
+            .padding(horizontal = 48.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "⌕",
+            color = if (isFocused) PrimeColors.Accent else PrimeColors.TextSecondary,
+            fontSize = 22.sp,
+            modifier = Modifier.padding(end = 12.dp)
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(48.dp)
+                .clip(shape)
+                .background(PrimeColors.Card)
+                .border(width = if (isFocused) 2.dp else 1.dp, color = borderColor, shape = shape)
+                .padding(horizontal = 16.dp)
+                .onFocusChanged { isFocused = it.isFocused },
+            contentAlignment = Alignment.CenterStart
+        ) {
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusable(),
+                textStyle = TextStyle(
+                    color = PrimeColors.TextPrimary,
+                    fontSize = 18.sp
+                ),
+                cursorBrush = SolidColor(PrimeColors.Accent),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { /* filter is live */ }),
+                decorationBox = { inner ->
+                    if (query.isEmpty()) {
+                        Text(
+                            text = "Search channels…",
+                            color = PrimeColors.TextDisabled,
+                            fontSize = 18.sp
+                        )
+                    }
+                    inner()
+                }
+            )
+        }
+        if (query.isNotEmpty()) {
+            Spacer(modifier = Modifier.width(12.dp))
+            Button(onClick = onClear) {
+                Text("Clear", fontSize = 14.sp)
+            }
+        }
+        if (resultCount != null) {
+            Spacer(modifier = Modifier.width(16.dp))
+            Text(
+                text = "$resultCount found",
+                color = PrimeColors.TextSecondary,
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
     }
 }
