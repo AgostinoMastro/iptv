@@ -1,0 +1,5 @@
+# Intermediate / local-only artifacts
+checked/
+italy-source.m3u
+italy-dead.m3u
+*.log
