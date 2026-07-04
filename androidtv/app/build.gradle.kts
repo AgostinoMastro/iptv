@@ -14,8 +14,8 @@ android {
         applicationId = "com.agostinomastro.iptv"
         minSdk = 23
         targetSdk = 34
-        versionCode = 14
-        versionName = "1.6.5"
+        versionCode = 15
+        versionName = "1.6.6"
     }
 
     signingConfigs {

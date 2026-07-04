@@ -3,11 +3,8 @@ package com.agostinomastro.iptv
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.KeyEvent
 import android.view.View
-import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -16,6 +13,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
@@ -26,15 +24,6 @@ class PlayerActivity : AppCompatActivity() {
 
     private var player: ExoPlayer? = null
     private lateinit var playerView: PlayerView
-    private lateinit var liveBadge: TextView
-    private lateinit var channelNameView: TextView
-    private val uiHandler = Handler(Looper.getMainLooper())
-    private val liveUiUpdater = object : Runnable {
-        override fun run() {
-            updateLiveUi()
-            uiHandler.postDelayed(this, LIVE_UI_UPDATE_MS)
-        }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,17 +39,10 @@ class PlayerActivity : AppCompatActivity() {
 
         setContentView(R.layout.activity_player)
         playerView = findViewById(R.id.player_view)
-        liveBadge = findViewById(R.id.live_badge)
-        channelNameView = findViewById(R.id.channel_name)
-        configureControls(channel.name)
+        configureControls()
 
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(
-                /* minBufferMs = */ 30_000,
-                /* maxBufferMs = */ 90_000,
-                /* bufferForPlaybackMs = */ 2_500,
-                /* bufferForPlaybackAfterRebufferMs = */ 5_000
-            )
+            .setBufferDurationsMs(30_000, 90_000, 2_500, 5_000)
             .build()
 
         player = ExoPlayer.Builder(this)
@@ -70,6 +52,12 @@ class PlayerActivity : AppCompatActivity() {
             .build()
             .also { exoPlayer ->
                 playerView.player = exoPlayer
+                playerView.subtitleView?.visibility = View.GONE
+
+                exoPlayer.trackSelectionParameters = TrackSelectionParameters.Builder(this)
+                    .setDisabledTrackTypes(setOf(C.TRACK_TYPE_TEXT, C.TRACK_TYPE_METADATA))
+                    .build()
+
                 exoPlayer.setMediaItem(
                     MediaItem.Builder()
                         .setUri(channel.url)
@@ -89,26 +77,21 @@ class PlayerActivity : AppCompatActivity() {
 
                     override fun onEvents(player: Player, events: Player.Events) {
                         if (events.containsAny(
-                                Player.EVENT_IS_PLAYING_CHANGED,
-                                Player.EVENT_PLAYBACK_STATE_CHANGED,
                                 Player.EVENT_TIMELINE_CHANGED,
-                                Player.EVENT_MEDIA_ITEM_TRANSITION
+                                Player.EVENT_MEDIA_ITEM_TRANSITION,
+                                Player.EVENT_TRACKS_CHANGED
                             )
                         ) {
-                            updateLiveUi()
+                            updateSeekControls()
                         }
                     }
                 })
             }
-    }
 
-    override fun onStart() {
-        super.onStart()
-        uiHandler.post(liveUiUpdater)
+        title = channel.name
     }
 
     override fun onStop() {
-        uiHandler.removeCallbacks(liveUiUpdater)
         player?.pause()
         super.onStop()
     }
@@ -164,10 +147,7 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
-    private fun configureControls(channelName: String) {
-        channelNameView.text = channelName
-        channelNameView.visibility = View.VISIBLE
-
+    private fun configureControls() {
         playerView.setShowRewindButton(true)
         playerView.setShowFastForwardButton(true)
         playerView.setShowPreviousButton(false)
@@ -181,67 +161,23 @@ class PlayerActivity : AppCompatActivity() {
             listOf(
                 androidx.media3.ui.R.id.exo_prev,
                 androidx.media3.ui.R.id.exo_next,
-                androidx.media3.ui.R.id.exo_settings
+                androidx.media3.ui.R.id.exo_settings,
+                androidx.media3.ui.R.id.exo_progress,
+                androidx.media3.ui.R.id.exo_duration,
+                androidx.media3.ui.R.id.exo_position,
+                androidx.media3.ui.R.id.exo_time,
+                androidx.media3.ui.R.id.exo_subtitle
             ).forEach { id ->
                 playerView.findViewById<View>(id)?.visibility = View.GONE
             }
         }
     }
 
-    private fun updateLiveUi() {
+    private fun updateSeekControls() {
         val exoPlayer = player ?: return
         val seekable = exoPlayer.isCurrentMediaItemSeekable
-        val isLive = exoPlayer.isCurrentMediaItemLive
-
         playerView.setShowRewindButton(seekable)
         playerView.setShowFastForwardButton(seekable)
-
-        playerView.post {
-            val progress = playerView.findViewById<View>(androidx.media3.ui.R.id.exo_progress)
-            val duration = playerView.findViewById<View>(androidx.media3.ui.R.id.exo_duration)
-            progress?.visibility = if (seekable) View.VISIBLE else View.GONE
-            duration?.visibility = if (seekable) View.VISIBLE else View.GONE
-
-            (playerView.findViewById<View>(androidx.media3.ui.R.id.exo_position) as? TextView)?.text =
-                formatStatus(exoPlayer, isLive)
-        }
-
-        liveBadge.visibility = View.VISIBLE
-        liveBadge.text = formatBadge(exoPlayer, isLive)
-    }
-
-    private fun formatStatus(exoPlayer: Player, isLive: Boolean): String {
-        if (!exoPlayer.isPlaying &&
-            exoPlayer.playbackState != Player.STATE_BUFFERING &&
-            exoPlayer.playbackState != Player.STATE_IDLE
-        ) {
-            return getString(R.string.paused)
-        }
-
-        if (!isLive) return formatTime(exoPlayer.currentPosition)
-
-        val offsetMs = exoPlayer.currentLiveOffset
-        return when {
-            offsetMs == C.TIME_UNSET -> getString(R.string.live)
-            atLiveEdge(exoPlayer) -> getString(R.string.live)
-            else -> getString(R.string.behind_live, formatDuration(offsetMs))
-        }
-    }
-
-    private fun formatBadge(exoPlayer: Player, isLive: Boolean): String {
-        if (!exoPlayer.isPlaying &&
-            exoPlayer.playbackState != Player.STATE_BUFFERING
-        ) {
-            return getString(R.string.paused)
-        }
-        if (!isLive) return getString(R.string.live)
-        return if (atLiveEdge(exoPlayer)) {
-            getString(R.string.live)
-        } else {
-            val offsetMs = exoPlayer.currentLiveOffset
-            if (offsetMs == C.TIME_UNSET) getString(R.string.live)
-            else getString(R.string.behind_live, formatDuration(offsetMs))
-        }
     }
 
     private fun atLiveEdge(exoPlayer: Player): Boolean {
@@ -252,22 +188,12 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     private fun togglePlayPause(exoPlayer: Player) {
-        if (exoPlayer.isPlaying) {
-            exoPlayer.pause()
-        } else {
-            exoPlayer.play()
-        }
-        updateLiveUi()
+        if (exoPlayer.isPlaying) exoPlayer.pause() else exoPlayer.play()
     }
 
     private fun seekIfAllowed(exoPlayer: Player, deltaMs: Long): Boolean {
         if (!exoPlayer.isCurrentMediaItemSeekable) return false
-        if (deltaMs < 0) {
-            exoPlayer.seekBack()
-        } else {
-            exoPlayer.seekForward()
-        }
-        updateLiveUi()
+        if (deltaMs < 0) exoPlayer.seekBack() else exoPlayer.seekForward()
         return true
     }
 
@@ -278,26 +204,6 @@ class PlayerActivity : AppCompatActivity() {
             exoPlayer.seekTo(exoPlayer.duration.coerceAtLeast(0L))
         }
         exoPlayer.play()
-        updateLiveUi()
-    }
-
-    private fun formatDuration(durationMs: Long): String {
-        if (durationMs == C.TIME_UNSET || durationMs < 0) return "0:00"
-        val totalSeconds = durationMs / 1000
-        val minutes = totalSeconds / 60
-        val seconds = totalSeconds % 60
-        return if (minutes >= 60) {
-            val hours = minutes / 60
-            val mins = minutes % 60
-            String.format("%d:%02d:%02d", hours, mins, seconds)
-        } else {
-            String.format("%d:%02d", minutes, seconds)
-        }
-    }
-
-    private fun formatTime(positionMs: Long): String {
-        if (positionMs == C.TIME_UNSET) return "0:00"
-        return formatDuration(positionMs)
     }
 
     private fun hideSystemUi() {
@@ -312,7 +218,6 @@ class PlayerActivity : AppCompatActivity() {
     companion object {
         private const val SEEK_INCREMENT_MS = 10_000L
         private const val LIVE_EDGE_THRESHOLD_MS = 5_000L
-        private const val LIVE_UI_UPDATE_MS = 1_000L
 
         private const val EXTRA_NAME = "extra_name"
         private const val EXTRA_URL = "extra_url"
