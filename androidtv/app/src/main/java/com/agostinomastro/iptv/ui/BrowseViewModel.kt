@@ -20,6 +20,8 @@ data class BrowseUiState(
     val favoriteKeys: Set<String> = emptySet(),
     val heroChannel: Channel? = null,
     val previewChannel: Channel? = null,
+    val activeFilter: BrowseFilter = BrowseFilter.Home,
+    val searchExpanded: Boolean = false,
     val searchQuery: String = "",
     val fromCache: Boolean = false
 ) {
@@ -30,19 +32,47 @@ data class BrowseUiState(
         get() = previewChannel ?: heroChannel
 
     val isSearching: Boolean
-        get() = searchQuery.isNotBlank()
+        get() = searchExpanded && searchQuery.isNotBlank()
+
+    val filterBaseChannels: List<Channel>
+        get() = channelsForFilter(activeFilter, allChannels, favoriteKeys)
 
     val searchResults: List<Channel>
-        get() = if (!isSearching) emptyList() else allChannels.filter { it.matchesSearch(searchQuery) }
+        get() = if (!isSearching) emptyList() else filterBaseChannels.filter { it.matchesSearch(searchQuery) }
 
-    val visibleGroupedChannels: Map<String, List<Channel>>
+    val contentSections: List<ContentSection>
         get() {
-            if (!isSearching) return groupedChannels
-            return searchResults
-                .groupBy { it.group.ifBlank { "General" } }
-                .toSortedMap(compareBy { it.lowercase() })
+            if (isSearching) {
+                return if (searchResults.isEmpty()) emptyList()
+                else listOf(ContentSection("Search results (${searchResults.size})", searchResults))
+            }
+
+            return when (activeFilter) {
+                BrowseFilter.Home -> buildList {
+                    if (favoriteChannels.isNotEmpty()) {
+                        add(ContentSection("Favourites", favoriteChannels))
+                    }
+                    groupedChannels.forEach { (group, channels) ->
+                        add(ContentSection(group, channels))
+                    }
+                }
+                BrowseFilter.Favourites -> {
+                    if (favoriteChannels.isEmpty()) emptyList()
+                    else listOf(ContentSection("Favourites", favoriteChannels))
+                }
+                else -> {
+                    val channels = filterBaseChannels
+                    if (channels.isEmpty()) emptyList()
+                    else listOf(ContentSection(activeFilter.label, channels))
+                }
+            }
         }
 }
+
+data class ContentSection(
+    val title: String,
+    val channels: List<Channel>
+)
 
 private fun Channel.matchesSearch(query: String): Boolean {
     val q = query.trim().lowercase()
@@ -50,6 +80,26 @@ private fun Channel.matchesSearch(query: String): Boolean {
     return name.lowercase().contains(q) ||
         group.lowercase().contains(q) ||
         (tvgId?.lowercase()?.contains(q) == true)
+}
+
+private fun Channel.matchesCategory(category: String): Boolean {
+    val cat = category.lowercase()
+    return group.split(';').any { segment ->
+        val s = segment.trim().lowercase()
+        s == cat || s.contains(cat)
+    }
+}
+
+private fun channelsForFilter(
+    filter: BrowseFilter,
+    allChannels: List<Channel>,
+    favoriteKeys: Set<String>
+): List<Channel> = when (filter) {
+    BrowseFilter.Home -> allChannels
+    BrowseFilter.Favourites -> allChannels.filter { it.favoriteKey in favoriteKeys }
+    BrowseFilter.News -> allChannels.filter { it.matchesCategory("News") }
+    BrowseFilter.Sports -> allChannels.filter { it.matchesCategory("Sports") }
+    BrowseFilter.Movies -> allChannels.filter { it.matchesCategory("Movies") }
 }
 
 class BrowseViewModel(
@@ -100,15 +150,10 @@ class BrowseViewModel(
         }
     }
 
-    /** Updates the hero preview when navigating with D-pad focus. */
     fun previewChannel(channel: Channel) {
         _state.update { it.copy(previewChannel = channel) }
     }
 
-    /**
-     * Card select/click: first action previews in the hero; second action on the
-     * same channel starts playback. Returns true when playback should begin.
-     */
     fun onChannelSelect(channel: Channel): Boolean {
         val current = _state.value.displayedChannel
         return if (current?.favoriteKey == channel.favoriteKey) {
@@ -119,22 +164,41 @@ class BrowseViewModel(
         }
     }
 
-    /** @return true if added, false if removed */
     fun toggleFavorite(channel: Channel): Boolean {
         val added = favoritesStore.toggle(channel.favoriteKey)
         _state.update { it.copy(favoriteKeys = favoritesStore.getAll()) }
         return added
     }
 
-    fun isFavorite(channel: Channel): Boolean =
-        channel.favoriteKey in _state.value.favoriteKeys
+    fun setActiveFilter(filter: BrowseFilter) {
+        _state.update { state ->
+            val base = channelsForFilter(filter, state.allChannels, state.favoriteKeys)
+            state.copy(
+                activeFilter = filter,
+                searchExpanded = false,
+                searchQuery = "",
+                previewChannel = base.firstOrNull() ?: state.heroChannel
+            )
+        }
+    }
+
+    fun toggleSearch() {
+        _state.update { state ->
+            val expanded = !state.searchExpanded
+            state.copy(
+                searchExpanded = expanded,
+                searchQuery = if (expanded) state.searchQuery else ""
+            )
+        }
+    }
 
     fun setSearchQuery(query: String) {
         _state.update { state ->
-            val results = if (query.isBlank()) emptyList() else state.allChannels.filter { it.matchesSearch(query) }
+            val pool = state.filterBaseChannels
+            val results = if (query.isBlank()) emptyList() else pool.filter { it.matchesSearch(query) }
             val preview = when {
                 query.isNotBlank() && results.isNotEmpty() -> results.first()
-                query.isBlank() -> state.previewChannel ?: state.heroChannel
+                query.isBlank() -> pool.firstOrNull() ?: state.heroChannel
                 else -> state.previewChannel
             }
             state.copy(searchQuery = query, previewChannel = preview)
@@ -142,6 +206,11 @@ class BrowseViewModel(
     }
 
     fun clearSearch() {
-        setSearchQuery("")
+        _state.update { state ->
+            state.copy(
+                searchQuery = "",
+                previewChannel = state.filterBaseChannels.firstOrNull() ?: state.heroChannel
+            )
+        }
     }
 }

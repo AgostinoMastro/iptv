@@ -104,12 +104,21 @@ fun BrowseScreen(
                 }
 
                 Column(modifier = Modifier.fillMaxSize()) {
-                    SearchBar(
-                        query = state.searchQuery,
-                        resultCount = if (state.isSearching) state.searchResults.size else null,
-                        onQueryChange = viewModel::setSearchQuery,
-                        onClear = viewModel::clearSearch
+                    TopNavBar(
+                        activeFilter = state.activeFilter,
+                        searchExpanded = state.searchExpanded,
+                        onFilterSelected = viewModel::setActiveFilter,
+                        onSearchToggle = viewModel::toggleSearch
                     )
+
+                    if (state.searchExpanded) {
+                        SearchBar(
+                            query = state.searchQuery,
+                            resultCount = if (state.isSearching) state.searchResults.size else null,
+                            onQueryChange = viewModel::setSearchQuery,
+                            onClear = viewModel::clearSearch
+                        )
+                    }
 
                     LazyColumn(
                         modifier = Modifier.weight(1f),
@@ -125,49 +134,30 @@ fun BrowseScreen(
                             )
                         }
 
-                        if (state.isSearching) {
-                            if (state.searchResults.isEmpty()) {
-                                item {
-                                    Text(
-                                        text = "No channels match \"${state.searchQuery}\"",
-                                        color = PrimeColors.TextSecondary,
-                                        modifier = Modifier.padding(horizontal = 48.dp, vertical = 24.dp),
-                                        style = MaterialTheme.typography.bodyLarge
-                                    )
-                                }
-                            } else {
-                                item {
-                                    CategoryRow(
-                                        title = "Search results (${state.searchResults.size})",
-                                        channels = state.searchResults,
-                                        favoriteKeys = state.favoriteKeys,
-                                        previewChannelKey = hero?.favoriteKey,
-                                        onChannelFocused = viewModel::previewChannel,
-                                        onChannelClick = ::onChannelClick,
-                                        onChannelLongClick = ::toggleFavorite
-                                    )
-                                }
+                        if (state.isSearching && state.searchResults.isEmpty()) {
+                            item {
+                                Text(
+                                    text = "No channels match \"${state.searchQuery}\"",
+                                    color = PrimeColors.TextSecondary,
+                                    modifier = Modifier.padding(horizontal = 48.dp, vertical = 24.dp),
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
+                            }
+                        } else if (state.contentSections.isEmpty() && !state.isSearching) {
+                            item {
+                                Text(
+                                    text = emptyFilterMessage(state.activeFilter),
+                                    color = PrimeColors.TextSecondary,
+                                    modifier = Modifier.padding(horizontal = 48.dp, vertical = 24.dp),
+                                    style = MaterialTheme.typography.bodyLarge
+                                )
                             }
                         } else {
-                            if (state.favoriteChannels.isNotEmpty()) {
-                                item {
+                            state.contentSections.forEach { section ->
+                                item(key = section.title) {
                                     CategoryRow(
-                                        title = "Favourites",
-                                        channels = state.favoriteChannels,
-                                        favoriteKeys = state.favoriteKeys,
-                                        previewChannelKey = hero?.favoriteKey,
-                                        onChannelFocused = viewModel::previewChannel,
-                                        onChannelClick = ::onChannelClick,
-                                        onChannelLongClick = ::toggleFavorite
-                                    )
-                                }
-                            }
-
-                            state.visibleGroupedChannels.forEach { (group, channels) ->
-                                item {
-                                    CategoryRow(
-                                        title = group,
-                                        channels = channels,
+                                        title = section.title,
+                                        channels = section.channels,
                                         favoriteKeys = state.favoriteKeys,
                                         previewChannelKey = hero?.favoriteKey,
                                         onChannelFocused = viewModel::previewChannel,
@@ -186,6 +176,91 @@ fun BrowseScreen(
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
+private fun TopNavBar(
+    activeFilter: BrowseFilter,
+    searchExpanded: Boolean,
+    onFilterSelected: (BrowseFilter) -> Unit,
+    onSearchToggle: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(PrimeColors.Background)
+            .padding(horizontal = 48.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        BrowseFilter.entries.forEach { filter ->
+            FilterChip(
+                label = filter.label,
+                selected = activeFilter == filter && !searchExpanded,
+                onClick = { onFilterSelected(filter) }
+            )
+        }
+        Spacer(modifier = Modifier.weight(1f))
+        FilterChip(
+            label = if (searchExpanded) "Close" else "⌕ Search",
+            selected = searchExpanded,
+            onClick = onSearchToggle
+        )
+    }
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class, ExperimentalFoundationApi::class)
+@Composable
+private fun FilterChip(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(20.dp)
+    val interactionSource = remember { MutableInteractionSource() }
+
+    Box(
+        modifier = Modifier
+            .clip(shape)
+            .background(
+                when {
+                    selected -> PrimeColors.Accent
+                    isFocused -> PrimeColors.CardFocused
+                    else -> PrimeColors.Card
+                }
+            )
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                color = if (isFocused) PrimeColors.AccentBright else PrimeColors.Surface,
+                shape = shape
+            )
+            .focusable(interactionSource = interactionSource)
+            .combinedClickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .onFocusChanged { isFocused = it.isFocused }
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = if (selected) Color.White else PrimeColors.TextPrimary,
+            fontSize = 15.sp,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+        )
+    }
+}
+
+private fun emptyFilterMessage(filter: BrowseFilter): String = when (filter) {
+    BrowseFilter.Favourites -> "No favourites yet. Hold Select on a channel to add one."
+    BrowseFilter.News -> "No news channels in your playlist."
+    BrowseFilter.Sports -> "No sports channels in your playlist."
+    BrowseFilter.Movies -> "No movie channels in your playlist."
+    BrowseFilter.Home -> "No channels available."
+}
+
+@OptIn(ExperimentalTvMaterial3Api::class)
+@Composable
 private fun SearchBar(
     query: String,
     resultCount: Int?,
@@ -200,7 +275,7 @@ private fun SearchBar(
         modifier = Modifier
             .fillMaxWidth()
             .background(PrimeColors.Background)
-            .padding(horizontal = 48.dp, vertical = 16.dp),
+            .padding(horizontal = 48.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
