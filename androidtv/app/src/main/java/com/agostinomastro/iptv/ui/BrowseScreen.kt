@@ -30,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
@@ -87,8 +88,15 @@ fun BrowseScreen(
                 onRetry = viewModel::refresh
             )
             else -> {
-                val hero = state.focusedChannel ?: state.heroChannel
+                val hero = state.displayedChannel
                 val isHeroFavorite = hero?.favoriteKey in state.favoriteKeys
+
+                fun onChannelClick(channel: Channel) {
+                    if (viewModel.onChannelSelect(channel)) {
+                        context.startActivity(PlayerActivity.intent(context, channel))
+                    }
+                }
+
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 48.dp)
@@ -109,10 +117,9 @@ fun BrowseScreen(
                                 title = "Favourites",
                                 channels = state.favoriteChannels,
                                 favoriteKeys = state.favoriteKeys,
-                                onChannelFocused = viewModel::onChannelFocused,
-                                onChannelClick = { channel ->
-                                    context.startActivity(PlayerActivity.intent(context, channel))
-                                },
+                                previewChannelKey = hero?.favoriteKey,
+                                onChannelFocused = viewModel::previewChannel,
+                                onChannelClick = ::onChannelClick,
                                 onChannelLongClick = ::toggleFavorite
                             )
                         }
@@ -124,10 +131,9 @@ fun BrowseScreen(
                                 title = group,
                                 channels = channels,
                                 favoriteKeys = state.favoriteKeys,
-                                onChannelFocused = viewModel::onChannelFocused,
-                                onChannelClick = { channel ->
-                                    context.startActivity(PlayerActivity.intent(context, channel))
-                                },
+                                previewChannelKey = hero?.favoriteKey,
+                                onChannelFocused = viewModel::previewChannel,
+                                onChannelClick = ::onChannelClick,
                                 onChannelLongClick = ::toggleFavorite
                             )
                         }
@@ -148,16 +154,58 @@ private fun HeroSection(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(320.dp)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        PrimeColors.Surface,
-                        PrimeColors.Background
+            .height(360.dp)
+    ) {
+        if (!channel?.logo.isNullOrBlank()) {
+            AsyncImage(
+                model = channel.logo,
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(0.45f),
+                contentScale = ContentScale.Crop,
+                alignment = Alignment.Center
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(PrimeColors.Surface, PrimeColors.Background)
+                        )
+                    )
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            PrimeColors.Background,
+                            PrimeColors.Background.copy(alpha = 0.92f),
+                            PrimeColors.Background.copy(alpha = 0.55f),
+                            Color.Transparent
+                        )
                     )
                 )
-            )
-    ) {
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            PrimeColors.Background.copy(alpha = 0.4f),
+                            PrimeColors.Background
+                        )
+                    )
+                )
+        )
+
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -199,9 +247,11 @@ private fun HeroSection(
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = "Hold Select on a channel to add or remove favourites",
+                    text = "Select to preview · Select again or press Play to watch · Hold Select to favourite",
                     color = PrimeColors.TextDisabled,
-                    style = MaterialTheme.typography.bodySmall
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(20.dp))
                 Button(onClick = { onPlay(channel) }) {
@@ -218,6 +268,7 @@ private fun CategoryRow(
     title: String,
     channels: List<Channel>,
     favoriteKeys: Set<String>,
+    previewChannelKey: String?,
     onChannelFocused: (Channel) -> Unit,
     onChannelClick: (Channel) -> Unit,
     onChannelLongClick: (Channel) -> Unit
@@ -238,6 +289,7 @@ private fun CategoryRow(
                 ChannelCard(
                     channel = channel,
                     isFavorite = channel.favoriteKey in favoriteKeys,
+                    isPreviewed = channel.favoriteKey == previewChannelKey,
                     onFocused = { onChannelFocused(channel) },
                     onClick = { onChannelClick(channel) },
                     onLongClick = { onChannelLongClick(channel) }
@@ -252,6 +304,7 @@ private fun CategoryRow(
 private fun ChannelCard(
     channel: Channel,
     isFavorite: Boolean,
+    isPreviewed: Boolean,
     onFocused: () -> Unit,
     onClick: () -> Unit,
     onLongClick: () -> Unit
@@ -269,8 +322,16 @@ private fun ChannelCard(
             .clip(shape)
             .background(if (isFocused) PrimeColors.CardFocused else PrimeColors.Card)
             .border(
-                width = if (isFocused) 3.dp else 1.dp,
-                color = if (isFocused) PrimeColors.Accent else PrimeColors.Surface,
+                width = when {
+                    isFocused -> 3.dp
+                    isPreviewed -> 2.dp
+                    else -> 1.dp
+                },
+                color = when {
+                    isFocused -> PrimeColors.Accent
+                    isPreviewed -> PrimeColors.AccentBright.copy(alpha = 0.7f)
+                    else -> PrimeColors.Surface
+                },
                 shape = shape
             )
             .focusable(interactionSource = interactionSource)

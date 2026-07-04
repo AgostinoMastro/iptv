@@ -19,11 +19,14 @@ data class BrowseUiState(
     val groupedChannels: Map<String, List<Channel>> = emptyMap(),
     val favoriteKeys: Set<String> = emptySet(),
     val heroChannel: Channel? = null,
-    val focusedChannel: Channel? = null,
+    val previewChannel: Channel? = null,
     val fromCache: Boolean = false
 ) {
     val favoriteChannels: List<Channel>
         get() = allChannels.filter { it.favoriteKey in favoriteKeys }
+
+    val displayedChannel: Channel?
+        get() = previewChannel ?: heroChannel
 }
 
 class BrowseViewModel(
@@ -58,7 +61,7 @@ class BrowseViewModel(
                             groupedChannels = grouped,
                             favoriteKeys = favorites,
                             heroChannel = hero,
-                            focusedChannel = hero,
+                            previewChannel = hero,
                             error = null
                         )
                     }
@@ -74,8 +77,23 @@ class BrowseViewModel(
         }
     }
 
-    fun onChannelFocused(channel: Channel) {
-        _state.update { it.copy(focusedChannel = channel) }
+    /** Updates the hero preview when navigating with D-pad focus. */
+    fun previewChannel(channel: Channel) {
+        _state.update { it.copy(previewChannel = channel) }
+    }
+
+    /**
+     * Card select/click: first action previews in the hero; second action on the
+     * same channel starts playback. Returns true when playback should begin.
+     */
+    fun onChannelSelect(channel: Channel): Boolean {
+        val current = _state.value.displayedChannel
+        return if (current?.favoriteKey == channel.favoriteKey) {
+            true
+        } else {
+            _state.update { it.copy(previewChannel = channel) }
+            false
+        }
     }
 
     /** @return true if added, false if removed */
