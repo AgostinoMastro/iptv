@@ -3,8 +3,11 @@ package com.agostinomastro.iptv
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.KeyEvent
 import android.view.View
+import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -16,18 +19,22 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import com.agostinomastro.iptv.data.RecentsStore
 import com.agostinomastro.iptv.model.Channel
+import androidx.media3.ui.PlayerView
 
 class PlayerActivity : AppCompatActivity() {
 
     private var player: ExoPlayer? = null
     private lateinit var playerView: PlayerView
+    private val retryHandler = Handler(Looper.getMainLooper())
+    private var retryCount = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         hideSystemUi()
+        // Keep the screen awake during playback so the TV screensaver can't pull us out.
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         val channel = intent.getChannelExtra()
             ?: run {
@@ -39,16 +46,26 @@ class PlayerActivity : AppCompatActivity() {
 
         setContentView(R.layout.activity_player)
         playerView = findViewById(R.id.player_view)
+        playerView.keepScreenOn = true
         configureControls()
 
+        // Modest buffers keep startup fast and memory low on constrained devices
+        // (large buffers can OOM a Fire Stick after a minute of high-bitrate video).
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(30_000, 90_000, 2_500, 5_000)
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 15_000,
+                /* maxBufferMs = */ 30_000,
+                /* bufferForPlaybackMs = */ 1_000,
+                /* bufferForPlaybackAfterRebufferMs = */ 2_000
+            )
+            .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
         player = ExoPlayer.Builder(this)
             .setLoadControl(loadControl)
             .setSeekBackIncrementMs(SEEK_INCREMENT_MS)
             .setSeekForwardIncrementMs(SEEK_INCREMENT_MS)
+            .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
             .also { exoPlayer ->
                 playerView.player = exoPlayer
@@ -58,21 +75,12 @@ class PlayerActivity : AppCompatActivity() {
                     .setDisabledTrackTypes(setOf(C.TRACK_TYPE_TEXT, C.TRACK_TYPE_METADATA))
                     .build()
 
-                exoPlayer.setMediaItem(
-                    MediaItem.Builder()
-                        .setUri(channel.url)
-                        .setLiveConfiguration(
-                            MediaItem.LiveConfiguration.Builder()
-                                .setTargetOffsetMs(3_000)
-                                .build()
-                        )
-                        .build()
-                )
+                exoPlayer.setMediaItem(buildMediaItem(channel.url))
                 exoPlayer.prepare()
                 exoPlayer.playWhenReady = true
                 exoPlayer.addListener(object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
-                        playerView.showController()
+                        recoverFromError(error)
                     }
 
                     override fun onEvents(player: Player, events: Player.Events) {
@@ -84,11 +92,49 @@ class PlayerActivity : AppCompatActivity() {
                         ) {
                             updateSeekControls()
                         }
+                        // A clean playing state means the stream recovered; reset retries.
+                        if (events.contains(Player.EVENT_IS_PLAYING_CHANGED) && player.isPlaying) {
+                            retryCount = 0
+                        }
                     }
                 })
             }
 
         title = channel.name
+    }
+
+    /**
+     * Live IPTV streams frequently drop segments or fall behind their sliding window.
+     * Rather than letting the error surface (and the activity die), re-prepare the
+     * stream a few times, jumping back to the live edge when we've fallen behind.
+     */
+    private fun recoverFromError(error: PlaybackException) {
+        val exoPlayer = player ?: return
+        if (retryCount >= MAX_RETRIES) {
+            playerView.showController()
+            return
+        }
+        retryCount++
+
+        val delayMs = if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) {
+            exoPlayer.seekToDefaultPosition()
+            exoPlayer.prepare()
+            0L
+        } else {
+            RETRY_DELAY_MS
+        }
+
+        if (delayMs > 0L) {
+            retryHandler.postDelayed({
+                player?.let {
+                    it.seekToDefaultPosition()
+                    it.prepare()
+                    it.play()
+                }
+            }, delayMs)
+        } else {
+            exoPlayer.play()
+        }
     }
 
     override fun onStop() {
@@ -97,6 +143,7 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        retryHandler.removeCallbacksAndMessages(null)
         player?.release()
         player = null
         super.onDestroy()
@@ -218,12 +265,24 @@ class PlayerActivity : AppCompatActivity() {
     companion object {
         private const val SEEK_INCREMENT_MS = 10_000L
         private const val LIVE_EDGE_THRESHOLD_MS = 5_000L
+        private const val MAX_RETRIES = 5
+        private const val RETRY_DELAY_MS = 1_500L
 
         private const val EXTRA_NAME = "extra_name"
         private const val EXTRA_URL = "extra_url"
         private const val EXTRA_GROUP = "extra_group"
         private const val EXTRA_LOGO = "extra_logo"
         private const val EXTRA_TVG_ID = "extra_tvg_id"
+
+        private fun buildMediaItem(url: String): MediaItem =
+            MediaItem.Builder()
+                .setUri(url)
+                .setLiveConfiguration(
+                    MediaItem.LiveConfiguration.Builder()
+                        .setTargetOffsetMs(3_000)
+                        .build()
+                )
+                .build()
 
         fun intent(context: Context, channel: Channel): Intent {
             return Intent(context, PlayerActivity::class.java).apply {

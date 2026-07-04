@@ -36,6 +36,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -511,25 +513,32 @@ private fun ChannelCard(
     onLongClick: () -> Unit
 ) {
     var isFocused by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(if (isFocused) 1.1f else 1f, label = "cardScale")
+    val scale by animateFloatAsState(if (isFocused) 1.14f else 1f, label = "cardScale")
     val shape = RoundedCornerShape(12.dp)
 
     val interactionSource = remember { MutableInteractionSource() }
 
     Box(
         modifier = Modifier
+            .zIndex(if (isFocused) 1f else 0f)
             .size(width = 180.dp, height = 120.dp)
             .scale(scale)
+            .shadow(
+                elevation = if (isFocused) 16.dp else 0.dp,
+                shape = shape,
+                ambientColor = PrimeColors.Accent,
+                spotColor = PrimeColors.Accent
+            )
             .clip(shape)
             .background(if (isFocused) PrimeColors.CardFocused else PrimeColors.Card)
             .border(
                 width = when {
-                    isFocused -> 3.dp
+                    isFocused -> 4.dp
                     isPreviewed -> 2.dp
                     else -> 1.dp
                 },
                 color = when {
-                    isFocused -> PrimeColors.Accent
+                    isFocused -> PrimeColors.AccentBright
                     isPreviewed -> PrimeColors.AccentBright.copy(alpha = 0.7f)
                     else -> PrimeColors.Surface
                 },
